@@ -1,0 +1,98 @@
+---
+version: '3.4'
+
+# usage <<: *logging
+x-logging: &logging
+  logging:
+    driver: syslog
+    options:
+      syslog-address: 'tcp://prlxmonitoring01.dms.local:514'
+
+x-deploy: &deploy
+  restart_policy:
+    condition: on-failure
+  mode: replicated
+  replicas: 1
+  update_config:
+    delay: 2s
+  labels:
+    orbiter: "true"
+    orbiter.up: "3"
+    orbiter.down: "1"
+    traefik.frontend.priority: "10"
+    traefik.frontend.entryPoints: "http, https"
+    traefik.frontend.headers.SSLRedirect: "true"
+    traefik.docker.network: "public"
+    traefik.default.protocol: "http"
+
+
+services:
+
+  oauthproxy:
+    image: a5huynh/oauth2_proxy:latest
+    networks:
+      - public
+      - internal
+    ports:
+      - "4180/tcp"
+    command: |
+      --cookie-secure=false
+      --cookie-secret=$OAUTH2_COOKIE_SECRET
+      --client-id=$OAUTH2_CLIENT_ID
+      --client-secret=$OAUTH2_CLIENT_SECRET
+      --github-org="Dallas-Makerspace"
+      --provider=github
+      --upstream=http://tensorflow:8888/
+      --http-address=0.0.0.0:4180
+      --email-domain="*"
+      --redirect-url=https://tensorflow.dallasmakerspace.org
+    deploy:
+      <<: *deploy
+      labels:
+        traefik.enable: "true"
+        traefik.port: "4180"
+        traefik.frontend.rule: "$TRAEFIK_HOSTRULE"
+        #traefik.frontend.auth.forward.address: "https://dallasmakerspace.okta.com/"
+        #traefik.frontend.auth.forward.trustForwardHeader: "true"
+
+  juypter:
+    image: 'tensorflow/tensorflow:latest'
+    ports:
+      - "8888/tcp"
+    hostname: "tensorflow.dallasmakerspace.org"
+    networks:
+      internal:
+        aliases:
+          - tensorflow
+    volumes:
+      - tf-data:/notebooks
+    command: |
+      /run_jupyter.sh
+      --allow-root
+      --NotebookApp.allow_password_change=False
+      --NotebookApp.allow_origin='*'
+      --NotebookApp.password_required=False
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+      --NotebookApp.terminals_enabled=False
+
+    deploy:
+      <<: *deploy
+      labels:
+        traefik.enable: "false"
+
+volumes:
+  tf-data: {}
+
+networks:
+
+  public:
+    external:
+      name: public
+
+  internal:
+    external:
+      name: internal
+
+...
+# vim: set sts=2 sw=2 ts=2 et ai number ruler :
